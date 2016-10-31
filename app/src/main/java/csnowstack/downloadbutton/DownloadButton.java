@@ -46,7 +46,7 @@ public class DownloadButton extends View {
         super(context, attrs);
         mFlag = INITIALIZATION;
 
-        mLineWidth = 220;
+        mLineWidth = 110;
         mLineSize = mLineWidth / 10f;
         mDistanceLine = mLineWidth / 4f;
         mRectangleSideLength = mLineWidth / 9f * 4f;
