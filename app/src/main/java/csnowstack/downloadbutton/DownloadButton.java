@@ -11,7 +11,9 @@ import android.graphics.Path;
 import android.graphics.PathMeasure;
 import android.graphics.RectF;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 
 /**
  * Created by cqll on 2016/10/27.
@@ -19,17 +21,18 @@ import android.view.View;
 
 public class DownloadButton extends View {
     private Paint mPaint;
+    private boolean mLoading=false;
 
     private int mFlag, mCenterX, mCenterY;
-
-    private float mFractionLine = 0/*线段的弹动比例*/, mFractionLineLast = 0/*线段的弹动比例*/, mFractionArrowFirst = 0/*箭头第一步动画的比例*/, mFractionArrowSecond = 0/*箭头第二步动画的比例*/;
-    private ValueAnimator mAnimatorArrowFirst/*箭头移动到线段时的动画*/, mAnimatorLine, mAnimatorArrowSecond/*箭头压迫线段和弹回时的动画*/;
+    private float mFractionRipple=0,mClickX,mClickY,mFractionLine = 0/*线段的弹动比例*/, mFractionLineLast = 0/*线段的弹动比例*/, mFractionArrowFirst = 0/*箭头第一步动画的比例*/, mFractionArrowSecond = 0/*箭头第二步动画的比例*/;
+    private ValueAnimator mAnimatorRipple,mAnimatorArrowFirst/*箭头移动到线段时的动画*/, mAnimatorLine, mAnimatorArrowSecond/*箭头压迫线段和弹回时的动画*/;
 
     private PathMeasure mPathMeasureLine;//用于计算向下移动时最下面的那个点的移动距离
     private float mLineWidth, mLineSize, mLineMaxMove, mDistanceLine/*线段跟原点的距离*/, mRectangleSideLength/*正方形边长*/, mAngleRight/*对号的左边与坐标的夹角*/, mRightShortSize/*对号左边边长*/;
     private Path mPath, mPathDst;
     private float mPos[] = new float[2];//线段突出的点的坐标
     private RectF mRectFRectangle;//最后方形
+
 
     private static final int INITIALIZATION = 0;//初始化到移动箭头
     private static final int TOUCH_LINE = 1;//压迫线段
@@ -52,7 +55,6 @@ public class DownloadButton extends View {
         mRectFRectangle = new RectF();
 
         mPaint = new Paint();
-//        mPaint.setColor(0xffF3F3F3);
         mPaint.setColor(Color.BLACK);
         mPaint.setAntiAlias(true);
         mPaint.setStrokeWidth(mLineSize);
@@ -62,6 +64,28 @@ public class DownloadButton extends View {
         mPathDst = new Path();
 
         mPathMeasureLine = new PathMeasure();
+
+
+
+        //ripple 动画
+        mAnimatorRipple=ValueAnimator.ofFloat(0,1);
+        mAnimatorRipple.setDuration(600);
+        mAnimatorRipple.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                mFractionRipple= (float) animation.getAnimatedValue();
+                invalidate();
+            }
+        });
+
+        mAnimatorRipple.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                super.onAnimationEnd(animation);
+                mAnimatorArrowFirst.start();//开启箭头的第一步动画
+            }
+        });
+
 
         //箭头第一步动画
         mAnimatorArrowFirst = ValueAnimator.ofFloat(0, 1, 0, -1);//箭头的动画,向左上移动，移动回来，移到到最下面
@@ -107,6 +131,7 @@ public class DownloadButton extends View {
 
         //箭头的动画,alpha，画对号，对号变矩形，画三角形
         mAnimatorArrowSecond = ValueAnimator.ofFloat(0.6f, 0, -1, -2, -3);//不要问我为什么这样写，不想用多个valueAnimator
+        mAnimatorArrowSecond.setInterpolator(new DecelerateInterpolator());//先减速后加速
         mAnimatorArrowSecond.setDuration(2400);
         mAnimatorArrowSecond.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
@@ -120,7 +145,9 @@ public class DownloadButton extends View {
             @Override
             public void onAnimationEnd(Animator animation) {
                 super.onAnimationEnd(animation);
+                mLoading=false;
                 mFlag = INITIALIZATION;
+                mFractionRipple=0;
                 mFractionLine = 0;
                 mFractionLineLast = 0;
                 mFractionArrowFirst = 0;
@@ -134,18 +161,29 @@ public class DownloadButton extends View {
     }
 
     @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        setMeasuredDimension(Math.round(mLineWidth*3),Math.round(mLineWidth*3));
+
+    }
+
+
+
+    @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         mCenterX = w / 2;
         mCenterY = h / 2;
         mRightShortSize = mLineWidth / 2f * 0.85f;//对号的短边的长
         mRectFRectangle.set(mCenterX - (mLineWidth / 2 - mRectangleSideLength / 2) + mLineSize / 2, mCenterY - mLineWidth / 2 - mRectangleSideLength, mCenterX - (mLineWidth / 2 - mRectangleSideLength / 2) + mRectangleSideLength + mLineSize / 2, mCenterY - mLineWidth / 2);
-
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        mPath.addCircle(mCenterX,mCenterY,mCenterX, Path.Direction.CW);//裁剪成为圆形
+        canvas.clipPath(mPath);
+
 
         //画弹跳的线
         mPath.reset();
@@ -156,8 +194,18 @@ public class DownloadButton extends View {
         canvas.save();
 
         if (mFlag == INITIALIZATION) {//初始化
+            if(mFractionRipple>0&&mFractionRipple<1){//ripple 动画
+                mPaint.setStyle(Paint.Style.FILL);
+                mPaint.setColor(0xfff3f3f3);
+                canvas.drawCircle(mCenterX,mCenterY,mCenterX,mPaint);
+                mPaint.setColor(0xffc1c1c1);
+                canvas.drawCircle(mClickX,mClickY,mCenterX*mFractionRipple*2,mPaint);
+                mPaint.setColor(Color.BLACK);
+                mPaint.setStyle(Paint.Style.STROKE);
+            }
 
             //向右上移动并移动回来,完成第一步动画
+
             if (mFractionArrowFirst > 0) {
                 canvas.translate(mDistanceLine * mFractionArrowFirst, -mDistanceLine * mFractionArrowFirst * 1.6f);
                 canvas.rotate(mFractionArrowFirst * 20f, mCenterX, mCenterY);
@@ -229,6 +277,20 @@ public class DownloadButton extends View {
         canvas.restore();
     }
 
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if(!mLoading&&event.getAction()== MotionEvent.ACTION_DOWN){
+            mLoading=true;
+            mClickX=event.getX();
+            mClickY=event.getY();
+            mAnimatorRipple.start();
+            return true;
+        }
+
+        return super.onTouchEvent(event);
+    }
+
     //  箭头的path
     private void setArrowPath() {
         mPath.reset();
@@ -265,9 +327,6 @@ public class DownloadButton extends View {
         mPath.close();
     }
 
-    public void download() {
-        mAnimatorArrowFirst.start();
-    }
 
     @Override
     protected void onDetachedFromWindow() {
